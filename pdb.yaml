@@ -1,0 +1,12 @@
+---
+# 节点维护/驱逐时的可用性保护（与灰度发布的 maxUnavailable 互补）
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: my-app
+  namespace: prod
+spec:
+  minAvailable: 3          # 4 副本时至少保 3 个
+  selector:
+    matchLabels:
+      app: my-app

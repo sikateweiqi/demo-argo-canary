@@ -1,0 +1,23 @@
+---
+# 分析二：P99 延迟（>500ms 判定劣化 —— 只看错误率会漏掉"没报错但变慢"的版本）
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: latency-p99
+  namespace: prod
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: p99-latency
+      interval: 1m
+      count: 5
+      successCondition: result[0] <= 0.5      # 单位：秒
+      failureLimit: 1
+      inconclusiveLimit: 1
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring:9090
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(nginx_ingress_controller_request_duration_seconds_bucket{service="{{args.service-name}}"}[5m])) by (le))

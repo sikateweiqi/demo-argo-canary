@@ -1,0 +1,113 @@
+---
+# ============================================================
+# 核心：Rollout（生产级配置）
+# 触发方式：改 spec.template.spec.containers[0].image 的 tag
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: my-app
+  namespace: prod
+  labels:
+    app: my-app
+spec:
+  replicas: 4
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      # ---- 安全基线 ----
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      # ---- 跨 AZ 均匀分布 ----
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: my-app
+      containers:
+        - name: app
+          image: 123456789.dkr.ecr.ap-northeast-1.amazonaws.com/my-app:v1.0.0   # 改 tag 触发灰度
+          ports:
+            - containerPort: 8080
+          # ---- 资源限制（HPA 依赖 requests 计算）----
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          # ---- 就绪/存活探针：灰度的生命线 ----
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          # ---- 优雅下线：等 LB 摘流，防连接被切断 ----
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 15"]
+      terminationGracePeriodSeconds: 45
+  strategy:
+    canary:
+      # ---- 容量控制：灰度期间容量不打折 ----
+      maxSurge: 25%
+      maxUnavailable: 0
+      # ---- 双 Service：Rollouts 控制器改写 selector 实现流量切分 ----
+      stableService: my-app-stable
+      canaryService: my-app-canary
+      # ---- NGINX Ingress 按权重精确切流量 ----
+      trafficRouting:
+        nginx:
+          stableIngress: my-app-stable
+      # ---- 生产级灰度细节 ----
+      scaleDownDelaySeconds: 300          # 切换后旧版本延迟缩容，保长连接
+      dynamicStableScale: true            # 灰度时稳定版不提前扩容
+      abortScaleDownDelaySeconds: 30s     # 中止后快速回收 canary
+      matchTrafficWeight: true            # canary 副本数与流量权重匹配
+      steps:
+        - setWeight: 5                    # ── 5% 冒烟 ──
+        - pause: { duration: 10m }
+        - analysis:
+            templates:
+              - templateName: success-rate
+              - templateName: latency-p99
+            args:
+              - name: service-name
+                value: my-app-stable
+        - setWeight: 25                   # ── 25% ──
+        - pause: { duration: 10m }
+        - analysis:
+            templates:
+              - templateName: success-rate
+            args:
+              - name: service-name
+                value: my-app-stable
+        - setWeight: 50                   # ── 50% ──
+        - pause: { duration: 30m }
+        - analysis:
+            templates:
+              - templateName: success-rate
+            args:
+              - name: service-name
+                value: my-app-stable
+        - setWeight: 100                  # ── 全量 ──

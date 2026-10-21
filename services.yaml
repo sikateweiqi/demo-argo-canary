@@ -1,0 +1,30 @@
+---
+# 双 Service：selector 由 Rollouts 控制器动态改写
+# 灰度期间：stable → 旧 Pod，canary → 新 Pod；NGINX Ingress 按权重拆分两者流量
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-stable
+  namespace: prod
+  labels: { app: my-app }
+spec:
+  type: ClusterIP
+  selector:
+    app: my-app
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-canary
+  namespace: prod
+  labels: { app: my-app }
+spec:
+  type: ClusterIP
+  selector:
+    app: my-app
+  ports:
+    - port: 80
+      targetPort: 8080

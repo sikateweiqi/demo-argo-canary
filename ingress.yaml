@@ -1,0 +1,22 @@
+---
+# 稳定版 Ingress（Rollouts 会自动生成/管理对应的 canary Ingress 拆分流量）
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-app-stable
+  namespace: prod
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: 8m
+spec:
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-app-stable
+                port:
+                  number: 80

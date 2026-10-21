@@ -1,0 +1,24 @@
+---
+# 分析一：错误率（5xx 比例 >1% 判定失败）
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate
+  namespace: prod
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: success-rate
+      interval: 1m          # 每 1 分钟测一次
+      count: 5              # 连续测 5 次，全过才算过
+      successCondition: result[0] >= 0.99
+      failureLimit: 1       # 失败 1 次即判定失败 → Rollout 自动回滚
+      inconclusiveLimit: 1  # 数据不足（无指标）也视为不可信 → 回滚，不赌
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring:9090
+          query: |
+            sum(rate(nginx_ingress_controller_requests{service="{{args.service-name}}", status!~"[45].*"}[2m]))
+            /
+            sum(rate(nginx_ingress_controller_requests{service="{{args.service-name}}"}[2m]))
